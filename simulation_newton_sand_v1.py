@@ -404,6 +404,7 @@ class Example:
         #      — the skeleton yields at small loads, giving the characteristic
         #      soft, mouldable feel.
         # ------------------------------------------------------------------
+        
         parser.add_argument("--density",            type=float, default=1100.0)
         parser.add_argument("--air-drag",           type=float, default=1.0)
         parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.0)
