@@ -17,6 +17,7 @@
 # rigid collider automatically.
 
 import sys
+import time
 
 import numpy as np
 import warp as wp
@@ -209,6 +210,13 @@ class Example:
             self.viewer.register_ui_callback(self.render_ui, position="side")
         self.viewer.show_particles = True
 
+        # ------------------------------------------------------------------
+        # Frame timing (headless mode FPS measurement)
+        # ------------------------------------------------------------------
+        self.frame_count = 0
+        self.frame_times = []
+        self.frame_time_start = time.time()
+
         self.capture()
 
     # ------------------------------------------------------------------
@@ -273,10 +281,23 @@ class Example:
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def step(self):
+        frame_start = time.time()
+
         if self.graph:
             wp.capture_launch(self.graph)
         else:
             self.simulate()
+
+        frame_elapsed = time.time() - frame_start
+        self.frame_times.append(frame_elapsed)
+        self.frame_count += 1
+
+        # Print fps every 60 frames
+        if self.frame_count % 60 == 0:
+            avg_frame_time = np.mean(self.frame_times[-60:])
+            actual_fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
+            elapsed_wall = time.time() - self.frame_time_start
+            print(f"[FPS] Frame {self.frame_count}: {actual_fps:.2f} fps (avg frame time: {avg_frame_time*1000:.2f}ms, wall time: {elapsed_wall:.1f}s)")
 
         self.sim_time += self.frame_dt
 
@@ -365,7 +386,7 @@ class Example:
         parser.add_argument("--initial-jitter", type=float, default=0.5)
 
         # Grid / solver
-        parser.add_argument("--voxel-size", "-dx", type=float, default=0.06)
+        parser.add_argument("--voxel-size", "-dx", type=float, default=0.02)
         parser.add_argument(
             "--grid-type", "-gt", type=str,
             default="sparse", choices=["sparse", "fixed", "dense"],
@@ -383,7 +404,7 @@ class Example:
         )
         parser.add_argument("--strain-basis", "-sb", type=str, default="P0")
         parser.add_argument("--collider-basis", "-cb", type=str, default="Q1")
-        parser.add_argument("--max-iterations", "-it", type=int, default=250)
+        parser.add_argument("--max-iterations", "-it", type=int, default=50)
         parser.add_argument("--tolerance", "-tol", type=float, default=1.0e-6)
         parser.add_argument(
             "--collider-velocity-mode", "-cvm", type=str,
@@ -405,17 +426,17 @@ class Example:
         #      soft, mouldable feel.
         # ------------------------------------------------------------------
         parser.add_argument("--density",            type=float, default=1100.0)
-        parser.add_argument("--air-drag",           type=float, default=1.0)
+        parser.add_argument("--air-drag",           type=float, default=5.0)
         parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.0)
 
-        parser.add_argument("--young-modulus",      "-ym",  type=float, default=1.5e5)
+        parser.add_argument("--young-modulus",      "-ym",  type=float, default=5e4)
         parser.add_argument("--poisson-ratio",      "-nu",  type=float, default=0.25)
         parser.add_argument("--friction",           "-mu",  type=float, default=1.2)
-        parser.add_argument("--damping",                    type=float, default=800.0)
+        parser.add_argument("--damping",                    type=float, default=5000.0)
 
-        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=300.0)
+        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=50.0)
         parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.0)
-        parser.add_argument("--yield-stress",       "-ys",  type=float, default=150.0)
+        parser.add_argument("--yield-stress",       "-ys",  type=float, default=20.0)
         parser.add_argument("--hardening",                  type=float, default=5.0)
 
         return parser
