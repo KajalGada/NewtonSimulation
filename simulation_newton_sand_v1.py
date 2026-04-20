@@ -362,10 +362,10 @@ class Example:
         # z capped at 0.20 so no robot link overlaps the spawn volume at startup
         parser.add_argument("--emit-hi", type=float, nargs=3, default=[ 0.15,  0.15, 0.20])
         parser.add_argument("--particles-per-cell", type=int, default=3)
-        parser.add_argument("--initial-jitter", type=float, default=0.5)
+        parser.add_argument("--initial-jitter", type=float, default=0.1)
 
         # Grid / solver
-        parser.add_argument("--voxel-size", "-dx", type=float, default=0.06)
+        parser.add_argument("--voxel-size", "-dx", type=float, default=0.005)
         parser.add_argument(
             "--grid-type", "-gt", type=str,
             default="sparse", choices=["sparse", "fixed", "dense"],
@@ -383,7 +383,7 @@ class Example:
         )
         parser.add_argument("--strain-basis", "-sb", type=str, default="P0")
         parser.add_argument("--collider-basis", "-cb", type=str, default="Q1")
-        parser.add_argument("--max-iterations", "-it", type=int, default=250)
+        parser.add_argument("--max-iterations", "-it", type=int, default=50)
         parser.add_argument("--tolerance", "-tol", type=float, default=1.0e-6)
         parser.add_argument(
             "--collider-velocity-mode", "-cvm", type=str,
@@ -410,12 +410,12 @@ class Example:
 
         parser.add_argument("--young-modulus",      "-ym",  type=float, default=1.5e5)
         parser.add_argument("--poisson-ratio",      "-nu",  type=float, default=0.25)
-        parser.add_argument("--friction",           "-mu",  type=float, default=1.2)
-        parser.add_argument("--damping",                    type=float, default=800.0)
+        parser.add_argument("--friction",           "-mu",  type=float, default=1.5)
+        parser.add_argument("--damping",                    type=float, default=1200.0)
 
-        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=300.0)
+        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=800.0)
         parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.0)
-        parser.add_argument("--yield-stress",       "-ys",  type=float, default=150.0)
+        parser.add_argument("--yield-stress",       "-ys",  type=float, default=400.0)
         parser.add_argument("--hardening",                  type=float, default=5.0)
 
         return parser
