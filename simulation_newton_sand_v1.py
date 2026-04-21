@@ -24,7 +24,7 @@ import warp as wp
 import newton
 import newton.examples
 import newton.utils
-from newton.solvers import SolverImplicitMPM
+from newton.solvers import SolverImplicitMPM, SolverFeatherstone
 
 # ---------------------------------------------------------------------------
 # UR5e waypoints — joint angles computed via numerical IK.
@@ -131,6 +131,17 @@ class Example:
                     hy=extents[1],
                     hz=extents[2],
                 )
+        elif self.collider == "box":
+            # Container box for sand to drop into
+            xform = wp.transform(wp.vec3(0.0, 0.0, -0.08), wp.quat_identity())
+            builder.add_shape_box(
+                body=-1,
+                cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=0.0),
+                xform=xform,
+                hx=0.20,
+                hy=0.20,
+                hz=0.08,
+            )
         elif self.collider != "none":
             extents = (0.5, 2.0, 0.8)
             if self.collider == "cube":
@@ -154,6 +165,73 @@ class Example:
 
         # Ground plane — moderate friction so sand piles rather than slides
         builder.add_ground_plane(cfg=newton.ModelBuilder.ShapeConfig(mu=0.5))
+
+        # ---- Dynamic container box for sand -------------------------------
+        # Create a container with bottom and walls where sand will drop in
+        # z = wall_thickness/2 + box_height/2 so bottom surface sits exactly at z=0
+        box_center = np.array([0.0, 0.0, 0.085])
+        box_width = 0.5
+        box_depth = 0.5
+        box_height = 0.15
+        wall_thickness = 0.02
+
+        self.box_body = builder.add_body(
+            xform=wp.transform(wp.vec3(box_center[0], box_center[1], box_center[2]), wp.quat_identity()),
+        )
+        box_body = self.box_body
+        box_shape_start = len(builder.shape_type)
+
+        # Bottom of container (local frame: offset only in z)
+        builder.add_shape_box(
+            body=box_body,
+            cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=400.0),
+            xform=wp.transform(wp.vec3(0.0, 0.0, -box_height/2), wp.quat_identity()),
+            hx=box_width/2,
+            hy=box_depth/2,
+            hz=wall_thickness/2,
+        )
+
+        # Front wall
+        builder.add_shape_box(
+            body=box_body,
+            cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=0.0),
+            xform=wp.transform(wp.vec3(0.0, -box_depth/2, 0.0), wp.quat_identity()),
+            hx=box_width/2,
+            hy=wall_thickness/2,
+            hz=box_height/2,
+        )
+
+        # Back wall
+        builder.add_shape_box(
+            body=box_body,
+            cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=0.0),
+            xform=wp.transform(wp.vec3(0.0, box_depth/2, 0.0), wp.quat_identity()),
+            hx=box_width/2,
+            hy=wall_thickness/2,
+            hz=box_height/2,
+        )
+
+        # Left wall
+        builder.add_shape_box(
+            body=box_body,
+            cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=0.0),
+            xform=wp.transform(wp.vec3(-box_width/2, 0.0, 0.0), wp.quat_identity()),
+            hx=wall_thickness/2,
+            hy=box_depth/2,
+            hz=box_height/2,
+        )
+
+        # Right wall
+        builder.add_shape_box(
+            body=box_body,
+            cfg=newton.ModelBuilder.ShapeConfig(mu=0.5, density=0.0),
+            xform=wp.transform(wp.vec3(box_width/2, 0.0, 0.0), wp.quat_identity()),
+            hx=wall_thickness/2,
+            hy=box_depth/2,
+            hz=box_height/2,
+        )
+
+        box_shape_end = len(builder.shape_type)
 
         # ---- Sand particles --------------------------------------------
         Example.emit_particles(builder, args)
@@ -194,6 +272,27 @@ class Example:
             body_mass=wp.zeros_like(self.model.body_mass),
             body_q=self.state_0.body_q,
         )
+
+        # Zero only robot body masses for Featherstone — box keeps its real mass.
+        # Robot is driven kinematically via FK so Featherstone must not integrate it.
+        body_mass_np = self.model.body_mass.numpy()
+        body_mass_np[:self.box_body] = 1e-6
+        self.model.body_mass.assign(body_mass_np)
+
+        # Set contact stiffness only on box shapes — avoids blasting MPM particles
+        ke = self.model.shape_material_ke.numpy()
+        kd = self.model.shape_material_kd.numpy()
+        mu = self.model.shape_material_mu.numpy()
+        ke[box_shape_start:box_shape_end] = 2.0e3
+        kd[box_shape_start:box_shape_end] = 50.0
+        mu[box_shape_start:box_shape_end] = 0.5
+        self.model.shape_material_ke.assign(ke)
+        self.model.shape_material_kd.assign(kd)
+        self.model.shape_material_mu.assign(mu)
+
+        self.rigid_solver = SolverFeatherstone(self.model)
+        self.collision_pipeline = newton.CollisionPipeline(self.model, soft_contact_margin=0.05)
+        self.contacts = self.collision_pipeline.contacts()
 
         # ------------------------------------------------------------------
         # Waypoint tracking (joint-space interpolation)
@@ -264,10 +363,12 @@ class Example:
 
     def simulate(self):
         for _ in range(self.sim_substeps):
-            # Update robot pose once per substep so the velocity seen by the
-            # MPM solver matches the actual arm speed (avoids the 4× spike that
-            # occurs when body_q is updated only once per frame).
             self._advance_robot_substep()
+            if self.sim_time >= 2.0:
+                self.collision_pipeline.collide(self.state_0, self.contacts)
+                self.rigid_solver.step(self.state_0, self.state_1, None, self.contacts, self.sim_dt)
+            else:
+                self.state_1 = self.state_0
             self.solver.step(self.state_0, self.state_1, None, None, self.sim_dt)
             self.solver._project_outside(self.state_1, self.state_1, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
@@ -347,18 +448,18 @@ class Example:
         # Scene
         parser.add_argument(
             "--collider",
-            default="none",
-            choices=["cube", "wedge", "concave", "none"],
+            default="box",
+            choices=["box", "cube", "wedge", "concave", "none"],
             type=str,
         )
         parser.add_argument("--gravity", type=float, nargs=3, default=[0, 0, -10])
 
         # Timing
         parser.add_argument("--fps", type=float, default=60.0)
-        parser.add_argument("--substeps", type=int, default=4)
+        parser.add_argument("--substeps", type=int, default=8)
 
         # Particle volume — compact initial pile matching granular_object.py
-        parser.add_argument("--emit-lo", type=float, nargs=3, default=[-0.15, -0.15, 0.02])
+        parser.add_argument("--emit-lo", type=float, nargs=3, default=[-0.15, -0.15, 0.05])
         # z capped at 0.20 so no robot link overlaps the spawn volume at startup
         parser.add_argument("--emit-hi", type=float, nargs=3, default=[ 0.15,  0.15, 0.20])
         parser.add_argument("--particles-per-cell", type=int, default=3)
