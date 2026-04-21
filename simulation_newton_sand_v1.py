@@ -155,6 +155,48 @@ class Example:
         # Ground plane — moderate friction so sand piles rather than slides
         builder.add_ground_plane(cfg=newton.ModelBuilder.ShapeConfig(mu=0.5))
 
+        # ---- Static container box — sand falls into this ---------------
+        box_width      = 0.5
+        box_depth      = 0.5
+        box_height     = 0.15
+        wall_thickness = 0.01
+
+        box_cfg = newton.ModelBuilder.ShapeConfig(
+            mu=0.6,    # friction — sand grips walls and settles
+            gap=0.001, # contact margin for MPM particle collision
+        )
+
+        # Bottom
+        builder.add_shape_box(
+            body=-1, cfg=box_cfg,
+            xform=wp.transform(wp.vec3(0.0, 0.0, wall_thickness * 0.5), wp.quat_identity()),
+            hx=box_width * 0.5, hy=box_depth * 0.5, hz=wall_thickness * 0.5,
+        )
+        # Front wall (−y)
+        builder.add_shape_box(
+            body=-1, cfg=box_cfg,
+            xform=wp.transform(wp.vec3(0.0, -box_depth * 0.5, box_height * 0.5), wp.quat_identity()),
+            hx=box_width * 0.5, hy=wall_thickness * 0.5, hz=box_height * 0.5,
+        )
+        # Back wall (+y)
+        builder.add_shape_box(
+            body=-1, cfg=box_cfg,
+            xform=wp.transform(wp.vec3(0.0, box_depth * 0.5, box_height * 0.5), wp.quat_identity()),
+            hx=box_width * 0.5, hy=wall_thickness * 0.5, hz=box_height * 0.5,
+        )
+        # Left wall (−x)
+        builder.add_shape_box(
+            body=-1, cfg=box_cfg,
+            xform=wp.transform(wp.vec3(-box_width * 0.5, 0.0, box_height * 0.5), wp.quat_identity()),
+            hx=wall_thickness * 0.5, hy=box_depth * 0.5, hz=box_height * 0.5,
+        )
+        # Right wall (+x)
+        builder.add_shape_box(
+            body=-1, cfg=box_cfg,
+            xform=wp.transform(wp.vec3(box_width * 0.5, 0.0, box_height * 0.5), wp.quat_identity()),
+            hx=wall_thickness * 0.5, hy=box_depth * 0.5, hz=box_height * 0.5,
+        )
+
         # ---- Sand particles --------------------------------------------
         Example.emit_particles(builder, args)
 
@@ -264,9 +306,6 @@ class Example:
 
     def simulate(self):
         for _ in range(self.sim_substeps):
-            # Update robot pose once per substep so the velocity seen by the
-            # MPM solver matches the actual arm speed (avoids the 4× spike that
-            # occurs when body_q is updated only once per frame).
             self._advance_robot_substep()
             self.solver.step(self.state_0, self.state_1, None, None, self.sim_dt)
             self.solver._project_outside(self.state_1, self.state_1, self.sim_dt)
