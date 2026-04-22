@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 #
-# Newton MPM simulation of kinetic sand with a UR5e robot.
+# Newton MPM simulation of kinetic sand with a UR5 + scoop end-effector.
 #
 # Structure follows newton/examples/mpm/example_mpm_granular.py.
 # Robot loading follows newton/examples/robot/example_robot_panda_hydro.py.
@@ -23,7 +23,6 @@ import warp as wp
 
 import newton
 import newton.examples
-import newton.utils
 from newton.solvers import SolverImplicitMPM
 
 # ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ _Q_ABOVE = np.array([-0.2696, -1.2040,  1.6280, -0.1908,  0.1230,  0.9396],
                     dtype=np.float32)
 
 # Wrist at y = −0.13, z = 0.05 — entry point of sweep (EE ≈ (−0.003, −0.131, 0.049))
-_Q_ENTER = np.array([-0.0066, -0.5588,  1.4786,  0.3709, -0.0002, -0.0004],
+_Q_EXIT = np.array([-0.0066, -0.5588,  1.4786,  0.3709, -0.0002, -0.0004],
                     dtype=np.float32)
 
 # Wrist at y =  0.00, z = 0.05 — midpoint of sweep  (EE ≈ (−0.003, 0.000, 0.049))
@@ -59,7 +58,7 @@ _Q_MID   = np.array([-0.2692, -0.5747,  1.5342,  0.3666,  0.0050,  0.0011],
                     dtype=np.float32)
 
 # Wrist at y = +0.13, z = 0.05 — exit point of sweep (EE ≈ (−0.003, 0.130, 0.049))
-_Q_EXIT  = np.array([-0.5143, -0.5587,  1.4782,  0.3708,  0.0049, -0.0002],
+_Q_ENTER  = np.array([-0.5143, -0.5587,  1.4782,  0.3708,  0.0049, -0.0002],
                     dtype=np.float32)
 
 # Waypoint list: (target_joint_angles, duration_in_seconds)
@@ -94,18 +93,19 @@ class Example:
         # Must be called before any bodies / particles are added
         SolverImplicitMPM.register_custom_attributes(builder)
 
-        # ---- UR5e robot ------------------------------------------------
+        # ---- UR5 + scoop robot -----------------------------------------
         # Placed at (0.5, 0, 0) with identity orientation.
         # shoulder_pan = π (set in initial joint_q below) rotates the arm
         # to face the sand pile at origin.
-        ur5e_asset = newton.utils.download_asset("universal_robots_ur5e")
-        builder.add_usd(
-            str(ur5e_asset / "usd_structured/ur5e.usda"),
-            xform=wp.transform(wp.vec3(0.5, 0.0, 0.0), wp.quat_identity()),
+        _URDF_PATH = "/home/gmr/Downloads/NewtonSimulation/ur_urdf/ur5_with_scoop.urdf"
+        builder.add_urdf(
+            _URDF_PATH,
+            xform=wp.transform(wp.vec3(0.5, 0.0, 0.0), wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), np.pi)),
+            floating=False,
             enable_self_collisions=False,
         )
 
-        # UR5e contributes 6 revolute DOFs (1 fixed base joint has 0 DOFs).
+        # UR5 contributes 6 revolute DOFs (fixed joints have 0 DOFs).
         # They are the first (and only) entries in builder.joint_q.
         self.ur5e_dof = 6
         builder.joint_q[:self.ur5e_dof] = _Q_ABOVE.tolist()
