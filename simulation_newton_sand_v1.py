@@ -11,10 +11,10 @@
 # low yield-strength so the bulk flows under disturbance but holds its
 # shape at rest.
 #
-# Robot control: kinematic FK drive.  Joint angles are interpolated
-# between waypoints each frame; newton.eval_fk propagates those angles
-# to body_q so that the MPM solver treats every robot link as a moving
-# rigid collider automatically.
+# Robot control: PD joint position targets via SolverFeatherstone.
+# Joint angles are interpolated between waypoints each frame; Featherstone
+# integrates dynamics and applies contact forces so the robot collides with
+# the box.  SolverImplicitMPM handles particle↔rigid collision separately.
 
 import sys
 
@@ -23,7 +23,7 @@ import warp as wp
 
 import newton
 import newton.examples
-from newton.solvers import SolverImplicitMPM
+from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 
 # ---------------------------------------------------------------------------
 # UR5e waypoints — joint angles computed via numerical IK.
@@ -109,6 +109,11 @@ class Example:
         # They are the first (and only) entries in builder.joint_q.
         self.ur5e_dof = 6
         builder.joint_q[:self.ur5e_dof] = _Q_ABOVE.tolist()
+
+        # PD gains — must be set on builder before finalize (like panda_hydro example).
+        for i in range(len(builder.joint_target_ke)):
+            builder.joint_target_ke[i] = 2000.0   # Nm/rad — position stiffness
+            builder.joint_target_kd[i] =  100.0   # Nms/rad — velocity damping
 
         # ---- Optional extra collider in the scene ----------------------
         self.collider = args.collider
@@ -213,29 +218,32 @@ class Example:
             if hasattr(self.model.mpm, key):
                 getattr(self.model.mpm, key).fill_(getattr(args, key))
 
-        # Use finite-difference body velocity: computes (body_q - body_q_prev) / dt
-        # rather than reading body_qd, which is zero for our FK-driven kinematic robot.
-        # Without this, the MPM solver treats the robot as stationary and particles
-        # get no smooth push-away velocity from moving links.
-        mpm_options.collider_velocity_mode = "finite_difference"
+        mpm_options.collider_velocity_mode = "backward"
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
-        self.solver = SolverImplicitMPM(self.model, mpm_options)
 
-        # Propagate home joint angles → body_q so the robot starts in the
-        # correct pose rather than the default zero-angle configuration.
-        self._apply_fk()
+        # Initialise body_q from the builder's starting pose.
+        newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
 
-        # Re-register colliders now that body_q reflects the FK home pose.
-        # This also initialises body_q_prev correctly (from state_0.body_q)
-        # so the first substep sees zero body velocity instead of a huge spike
-        # from zero-config → _Q_ABOVE.  Pass body_mass=0 so all robot links
-        # are treated as kinematic (they push sand, but sand cannot push them).
-        self.solver.setup_collider(
+        # ---- MPM solver (particles ↔ robot/box) -------------------------
+        self.mpm_solver = SolverImplicitMPM(self.model, mpm_options)
+        self.mpm_solver.setup_collider(
             body_mass=wp.zeros_like(self.model.body_mass),
             body_q=self.state_0.body_q,
         )
+
+        # ---- MuJoCo solver (robot dynamics, built-in contact detection) --
+        self.robot_solver = SolverMuJoCo(self.model)
+
+        # ---- PD joint position control -----------------------------------
+        self.control = self.model.control()
+
+        # Seed control targets to the starting pose so there is no impulse
+        # on the very first substep.
+        pos_np = self.control.joint_target_pos.numpy()
+        pos_np[:self.ur5e_dof] = _Q_ABOVE
+        self.control.joint_target_pos.assign(pos_np)
 
         # ------------------------------------------------------------------
         # Waypoint tracking (joint-space interpolation)
@@ -254,38 +262,26 @@ class Example:
         self.capture()
 
     # ------------------------------------------------------------------
-    # Robot FK helpers
+    # Robot control
     # ------------------------------------------------------------------
-    def _set_joint_q(self, q: np.ndarray):
-        """Write the 6 UR5e DOFs into model.joint_q."""
-        q_np = self.model.joint_q.numpy()
-        q_np[:self.ur5e_dof] = q
-        self.model.joint_q.assign(q_np)
+    def _update_robot_target(self):
+        """Interpolate waypoints and write joint position targets for PD control.
 
-    def _apply_fk(self):
-        """Propagate current model.joint_q → body_q in both states."""
-        newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
-        newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_1)
-
-    def _advance_robot_substep(self):
-        """Interpolate joint angles along the waypoint sequence, advancing by sim_dt.
-
-        Called once per substep so that body_q changes by exactly one substep's
-        worth of motion each call.  The MPM solver computes body velocity as
-        (body_q - body_q_prev) / sim_dt, so advancing by sim_dt here gives the
-        correct physical velocity instead of a 4× spike from frame-level updates.
+        Called once per frame (before CUDA graph launch) so the CPU-side array
+        update is visible to the GPU kernels inside the graph.
         """
         wp_target, wp_duration = _WAYPOINTS[self._wp_idx]
         prev_idx = (self._wp_idx - 1) % len(_WAYPOINTS)
         wp_prev, _ = _WAYPOINTS[prev_idx]
 
         t = min(self._wp_elapsed / wp_duration, 1.0)
-        q_interp = (1.0 - t) * wp_prev + t * wp_target
+        q_target = (1.0 - t) * wp_prev + t * wp_target
 
-        self._set_joint_q(q_interp)
-        self._apply_fk()
+        pos_np = self.control.joint_target_pos.numpy()
+        pos_np[:self.ur5e_dof] = q_target
+        self.control.joint_target_pos.assign(pos_np)
 
-        self._wp_elapsed += self.sim_dt  # advance by substep dt, not frame dt
+        self._wp_elapsed += self.frame_dt
         if self._wp_elapsed >= wp_duration:
             self._wp_idx = (self._wp_idx + 1) % len(_WAYPOINTS)
             self._wp_elapsed = 0.0
@@ -294,28 +290,41 @@ class Example:
     # Simulation loop
     # ------------------------------------------------------------------
     def capture(self):
-        """CUDA graph capture when conditions allow."""
-        self.graph = None
-        if wp.get_device().is_cuda and self.solver.grid_type == "fixed":
-            if self.sim_substeps % 2 != 0:
-                wp.utils.warn("Sim substeps must be even for graph capture of MPM step")
-            else:
-                with wp.ScopedCapture() as capture:
-                    self.simulate()
-                self.graph = capture.graph
+        self.robot_graph = None
+        if wp.get_device().is_cuda:
+            with wp.ScopedCapture() as capture:
+                self.simulate_robot()
+            self.robot_graph = capture.graph
 
-    def simulate(self):
+        self.sand_graph = None
+        if wp.get_device().is_cuda and self.mpm_solver.grid_type == "fixed":
+            with wp.ScopedCapture() as capture:
+                self.simulate_sand()
+            self.sand_graph = capture.graph
+
+    def simulate_robot(self):
         for _ in range(self.sim_substeps):
-            self._advance_robot_substep()
-            self.solver.step(self.state_0, self.state_1, None, None, self.sim_dt)
-            self.solver._project_outside(self.state_1, self.state_1, self.sim_dt)
+            self.state_0.clear_forces()
+            self.viewer.apply_forces(self.state_0)
+            self.robot_solver.step(self.state_0, self.state_1, self.control, contacts=None, dt=self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
+    def simulate_sand(self):
+        self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.frame_dt)
+
     def step(self):
-        if self.graph:
-            wp.capture_launch(self.graph)
+        # Update PD targets on CPU before the (possibly captured) GPU graph
+        self._update_robot_target()
+
+        if self.robot_graph:
+            wp.capture_launch(self.robot_graph)
         else:
-            self.simulate()
+            self.simulate_robot()
+
+        if self.sand_graph:
+            wp.capture_launch(self.sand_graph)
+        else:
+            self.simulate_sand()
 
         self.sim_time += self.frame_dt
 
