@@ -57,24 +57,25 @@ from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 _W3 = np.pi / 2   # scoop orientation
 
 # Hover above sand
-_Q_ABOVE  = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_ABOVE  = np.array([-1.00, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
 
 # In-sand poses: shoulder_lift and elbow identical → forearm height unchanged.
 # shoulder_pan drives the sweep; scoop arcs ~0.60 rad across the pile.
 # _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
-_Q_SIDE_A = np.array([-0.65, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
-
-_Q_SIDE_B = np.array([ 0.00, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_SIDE_1 = np.array([-0.55, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
+_Q_SIDE_2 = np.array([-0.55, -0.5,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
+_Q_SIDE_3 = np.array([-0.27, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
 
 # Waypoint list: (target_joint_angles, duration_seconds)
 # Hover while sand settles, then two full back-and-forth sweeps, then lift out.
 _WAYPOINTS = [
     (_Q_ABOVE,  2.5),  # hover — let sand settle under gravity
-    (_Q_SIDE_A, 1.5),  # descend to side A
-    (_Q_SIDE_B, 2.5),  # sweep 1 → side B
-    (_Q_SIDE_A, 2.5),  # sweep 2 ← side A  (1st back-and-forth complete)
-    (_Q_SIDE_B, 2.5),  # sweep 3 → side B
-    (_Q_SIDE_A, 2.5),  # sweep 4 ← side A  (2nd back-and-forth complete)
+    (_Q_SIDE_1, 1.5),  # descend to side A
+    (_Q_SIDE_2, 2.5),  # sweep 1 → side B
+    (_Q_SIDE_3, 2.5),  # sweep 2 ← side A  (1st back-and-forth complete)
+    (_Q_SIDE_1, 2.5),  # sweep 3 → side B
+    (_Q_SIDE_2, 2.5),  # sweep 4 ← side A  (2nd back-and-forth complete)
+    (_Q_SIDE_3, 2.5),
     (_Q_ABOVE,  1.5),  # lift out — loop repeats
 ]
 
