@@ -62,7 +62,7 @@ _Q_ABOVE  = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=
 # In-sand poses: shoulder_lift and elbow identical → forearm height unchanged.
 # shoulder_pan drives the sweep; scoop arcs ~0.60 rad across the pile.
 # _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
-_Q_SIDE_A = np.array([-0.65, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_SIDE_A = np.array([-0.55, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
 _Q_SIDE_B = np.array([ 0.00, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
@@ -168,8 +168,8 @@ class Example:
         builder.add_ground_plane(cfg=newton.ModelBuilder.ShapeConfig(mu=0.5))
 
         # ---- Static container box — sand falls into this ---------------
-        box_width      = 0.5
-        box_depth      = 0.5
+        box_width      = 0.35
+        box_depth      = 0.35
         box_height     = 0.15
         wall_thickness = 0.01
 
@@ -420,7 +420,7 @@ class Example:
         parser.add_argument("--initial-jitter", type=float, default=0.5)
 
         # Grid / solver
-        parser.add_argument("--voxel-size", "-dx", type=float, default=0.06)
+        parser.add_argument("--voxel-size", "-dx", type=float, default=0.03)
         parser.add_argument(
             "--grid-type", "-gt", type=str,
             default="sparse", choices=["sparse", "fixed", "dense"],
