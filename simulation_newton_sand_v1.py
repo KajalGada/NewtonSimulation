@@ -62,9 +62,9 @@ _Q_ABOVE  = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=
 # In-sand poses: shoulder_lift and elbow identical → forearm height unchanged.
 # shoulder_pan drives the sweep; scoop arcs ~0.60 rad across the pile.
 # _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
-_Q_SIDE_A = np.array([-0.55, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_SIDE_A = np.array([-0.55, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
-_Q_SIDE_B = np.array([ 0.00, -1.00,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_SIDE_B = np.array([ 0.00, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
 # Waypoint list: (target_joint_angles, duration_seconds)
 # Hover while sand settles, then two full back-and-forth sweeps, then lift out.
@@ -75,6 +75,10 @@ _WAYPOINTS = [
     (_Q_SIDE_A, 2.5),  # sweep 2 ← side A  (1st back-and-forth complete)
     (_Q_SIDE_B, 2.5),  # sweep 3 → side B
     (_Q_SIDE_A, 2.5),  # sweep 4 ← side A  (2nd back-and-forth complete)
+    (_Q_SIDE_B, 2.5),
+    (_Q_SIDE_A, 2.5),
+    (_Q_SIDE_B, 2.5),
+    (_Q_SIDE_A, 2.5),
     (_Q_ABOVE,  1.5),  # lift out — loop repeats
 ]
 
@@ -170,7 +174,7 @@ class Example:
         # ---- Static container box — sand falls into this ---------------
         box_width      = 0.35
         box_depth      = 0.35
-        box_height     = 0.15
+        box_height     = 0.1
         wall_thickness = 0.01
 
         box_cfg = newton.ModelBuilder.ShapeConfig(
@@ -397,7 +401,7 @@ class Example:
         # Waypoint cycle is 2.5+2.0+2.5+2.5+2.0 = 11.5 s.
         # Override the framework default of 100 frames so USD recording captures
         # at least one full robot sweep (11.5 s × 60 fps = 690 frames).
-        parser.set_defaults(num_frames=700)
+        parser.set_defaults(num_frames=1000)
 
         # Scene
         parser.add_argument(
@@ -420,7 +424,7 @@ class Example:
         parser.add_argument("--initial-jitter", type=float, default=0.5)
 
         # Grid / solver
-        parser.add_argument("--voxel-size", "-dx", type=float, default=0.03)
+        parser.add_argument("--voxel-size", "-dx", type=float, default=0.01)
         parser.add_argument(
             "--grid-type", "-gt", type=str,
             default="sparse", choices=["sparse", "fixed", "dense"],
