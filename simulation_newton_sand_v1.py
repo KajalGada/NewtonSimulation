@@ -64,7 +64,7 @@ _Q_ABOVE  = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=
 # _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
 _Q_SIDE_A = np.array([-0.55, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
-_Q_SIDE_B = np.array([ 0.00, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_SIDE_B = np.array([ 0.2, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
 # Waypoint list: (target_joint_angles, duration_seconds)
 # Hover while sand settles, then two full back-and-forth sweeps, then lift out.
@@ -174,12 +174,12 @@ class Example:
         # ---- Static container box — sand falls into this ---------------
         box_width      = 0.35
         box_depth      = 0.35
-        box_height     = 0.1
-        wall_thickness = 0.01
+        box_height     = 0.05
+        wall_thickness = 0.02  # must be >= voxel_size (0.06) so the MPM grid can resolve the wall
 
         box_cfg = newton.ModelBuilder.ShapeConfig(
-            mu=0.6,    # friction — sand grips walls and settles
-            gap=0.001, # contact margin for MPM particle collision
+            mu=0.6,
+            gap=0.01,  # must be >= particle radius (~0.01 m at default voxel_size=0.06)
         )
 
         # Bottom
@@ -467,15 +467,15 @@ class Example:
         parser.add_argument("--air-drag",           type=float, default=1.0)
         parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.0)
 
-        parser.add_argument("--young-modulus",      "-ym",  type=float, default=1.5e5)
+        parser.add_argument("--young-modulus",      "-ym",  type=float, default=5e3)
         parser.add_argument("--poisson-ratio",      "-nu",  type=float, default=0.25)
-        parser.add_argument("--friction",           "-mu",  type=float, default=1.2)
-        parser.add_argument("--damping",                    type=float, default=800.0)
+        parser.add_argument("--friction",           "-mu",  type=float, default=0.8)
+        parser.add_argument("--damping",                    type=float, default=3000.0)
 
-        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=300.0)
+        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=50.0)
         parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.0)
-        parser.add_argument("--yield-stress",       "-ys",  type=float, default=150.0)
-        parser.add_argument("--hardening",                  type=float, default=5.0)
+        parser.add_argument("--yield-stress",       "-ys",  type=float, default=25.0)
+        parser.add_argument("--hardening",                  type=float, default=0.5)
 
         return parser
 
