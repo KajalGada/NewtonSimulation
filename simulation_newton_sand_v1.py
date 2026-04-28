@@ -54,31 +54,48 @@ from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 #   - Only shoulder_pan changes between SIDE_A and SIDE_B, rotating the arm
 #     around the base Z-axis so only the scoop traces an arc through the sand.
 # ---------------------------------------------------------------------------
-_W3 = np.pi / 2   # scoop orientation
+_W3 = -np.pi / 2   # scoop orientation (wrist_3)
 
 # Hover above sand
-_Q_ABOVE  = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+_Q_ABOVE = np.array([-0.27, -1.50,  1.70,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
 
-# In-sand poses: shoulder_lift and elbow identical → forearm height unchanged.
-# shoulder_pan drives the sweep; scoop arcs ~0.60 rad across the pile.
-# _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
-_Q_SIDE_A = np.array([-0.55, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
-
-_Q_SIDE_B = np.array([ 0.2, -0.5,  1.00,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)
+# Scooping operation — U-shaped trajectory.
+# wrist_2 = 0 keeps the scoop face parallel to the ground during scooping
+# (vs wrist_2 = π/2 used in the hover which tilts the scoop for travel).
+#
+# Box bounds: ±0.175 m in x and y (box_width = box_depth = 0.35 m).
+# Robot base is at x = 0.5 m; EE_y ≈ −L·sin(shoulder_pan) where L ≈ 0.45 m.
+# shoulder_pan must stay within ±0.38 rad to keep EE_y inside the box.
+# Previous value of −0.55 rad pushed EE_y to ≈ +0.37 m (outside the wall).
+#
+# shoulder_pan: ±0.20 rad keeps EE_y ≈ ±0.09 m — well inside both walls.
+# shoulder_lift/elbow increased slightly (−0.55/1.10 vs −0.50/1.00) to extend
+# reach in x so the EE lands over the sand pile with wrist_2 = 0.
+#
+# Entry / exit: shoulder_lift=-0.85, elbow=1.30  →  EE above the sand surface.
+# In-sand:      shoulder_lift=-0.55, elbow=1.10  →  EE at sand depth.
+_Q_ENTRY = np.array([ -0.55, -0.8,  0.80,  np.pi / 2,  0.0,  _W3], dtype=np.float32)  # above sand, right
+_Q_IN_R  = np.array([ 0.20, -0.8,  0.80,  np.pi / 2,  np.pi / 4,  _W3], dtype=np.float32)  # in sand,    right
+_Q_IN_L  = np.array([-0.55, -0.8,  0.80,  np.pi / 2,  np.pi / 2,  _W3], dtype=np.float32)  # in sand,    left
+_Q_EXIT  = np.array([-0.20, -0.8,  0.80,  np.pi / 2,  0.0,  _W3], dtype=np.float32)  # above sand, left
 
 # Waypoint list: (target_joint_angles, duration_seconds)
-# Hover while sand settles, then two full back-and-forth sweeps, then lift out.
+# Each cycle traces one U-shaped scoop:
+#   ENTRY  → IN_R  : descend right side of U into sand
+#   IN_R   → IN_L  : traverse left through sand (bottom of U)
+#   IN_L   → EXIT  : ascend left side of U out of sand
+#   EXIT   → ENTRY : reset swing above the sand (in air) for next pass
 _WAYPOINTS = [
     (_Q_ABOVE,  2.5),  # hover — let sand settle under gravity
-    (_Q_SIDE_A, 1.5),  # descend to side A
-    (_Q_SIDE_B, 2.5),  # sweep 1 → side B
-    (_Q_SIDE_A, 2.5),  # sweep 2 ← side A  (1st back-and-forth complete)
-    (_Q_SIDE_B, 2.5),  # sweep 3 → side B
-    (_Q_SIDE_A, 2.5),  # sweep 4 ← side A  (2nd back-and-forth complete)
-    (_Q_SIDE_B, 2.5),
-    (_Q_SIDE_A, 2.5),
-    (_Q_SIDE_B, 2.5),
-    (_Q_SIDE_A, 2.5),
+    (_Q_ENTRY,  1.5),  # approach: above sand on right, scoop parallel to ground
+    (_Q_IN_R,   1.5),  # descend right side of U into sand
+    (_Q_IN_L,   3.0),  # traverse left through sand (bottom of U)
+    (_Q_EXIT,   1.5),  # ascend left side of U out of sand
+    (_Q_ENTRY,  2.0),  # reset: swing back above right (through air)
+    (_Q_IN_R,   1.5),  # second pass: descend right
+    (_Q_IN_L,   3.0),  # traverse left
+    (_Q_EXIT,   1.5),  # ascend left
+    (_Q_ENTRY,  2.0),  # reset: swing back above right
     (_Q_ABOVE,  1.5),  # lift out — loop repeats
 ]
 
@@ -115,6 +132,16 @@ class Example:
             floating=False,
             enable_self_collisions=False,
         )
+
+        # URDF shapes default to shape_margin=0, which gives the MPM collider
+        # zero thickness.  The grid-node activation condition is:
+        #   sdf = distance - thickness < 0.5 * voxel_size
+        # so a node activates when distance < thickness + 0.5 * voxel_size.
+        # Setting thickness = voxel_size ensures the zone extends 1.5 * voxel_size,
+        # covering the full B-spline support radius so every particle near the
+        # wall sees at least one activated collider node.
+        for i in range(builder.shape_count):
+            builder.shape_margin[i] = args.voxel_size
 
         # UR5 contributes 6 revolute DOFs (fixed joints have 0 DOFs).
         # They are the first (and only) entries in builder.joint_q.

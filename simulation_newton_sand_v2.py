@@ -62,9 +62,9 @@ _Q_ABOVE  = np.array([-1.00, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.fl
 # In-sand poses: shoulder_lift and elbow identical → forearm height unchanged.
 # shoulder_pan drives the sweep; scoop arcs ~0.60 rad across the pile.
 # _Q_SIDE_A = np.array([-0.55, -0.62,  1.96,  np.pi / 2,  0.0,  _W3], dtype=np.float32)
-_Q_SIDE_1 = np.array([-0.55, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
-_Q_SIDE_2 = np.array([-0.55, -0.5,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
-_Q_SIDE_3 = np.array([-0.27, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
+_Q_SIDE_1 = np.array([-0.45, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
+_Q_SIDE_2 = np.array([-0.45, -0.5,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
+_Q_SIDE_3 = np.array([-0.47, -1.50,  2.00,  np.pi / 2,  0.0,  4.00], dtype=np.float32)
 
 # Waypoint list: (target_joint_angles, duration_seconds)
 # Hover while sand settles, then two full back-and-forth sweeps, then lift out.
