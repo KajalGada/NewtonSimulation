@@ -25,7 +25,7 @@ import newton
 import newton.examples
 from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 
-_DATASET_PATH = "/home/gmr/Downloads/ur_ws/dataset/demo_20260515_140725_dedup_half2.npz"
+_DATASET_PATH = "dataset/demo_20260515_140725_dedup.npz"
 
 
 class Example:
@@ -172,6 +172,9 @@ class Example:
             if hasattr(self.model.mpm, key):
                 getattr(self.model.mpm, key).fill_(getattr(args, key))
 
+        # finite_difference computes collider velocity as (body_q - body_q_prev) / dt.
+        # With interleaved stepping (1 robot substep + 1 MPM substep, both at sim_dt),
+        # the displacement and dt cancel correctly → exact scoop velocity, no N× overestimate.
         mpm_options.collider_velocity_mode = "finite_difference"
 
         self.state_0 = self.model.state()
@@ -201,8 +204,6 @@ class Example:
             self.viewer.register_ui_callback(self.render_ui, position="side")
         self.viewer.show_particles = True
 
-        self.capture()
-
     # ------------------------------------------------------------------
     # Robot control
     # ------------------------------------------------------------------
@@ -213,7 +214,6 @@ class Example:
         idx_hi = idx_lo + 1
 
         if idx_lo >= self._dataset_len - 1:
-            # Past end of recording — hold the final pose
             q_target = self._dataset_states[-1]
         else:
             frac = t - idx_lo
@@ -226,45 +226,24 @@ class Example:
     # ------------------------------------------------------------------
     # Simulation loop
     # ------------------------------------------------------------------
-    def capture(self):
-        self.robot_graph = None
-        if wp.get_device().is_cuda:
-            with wp.ScopedCapture() as capture:
-                self.simulate_robot()
-            self.robot_graph = capture.graph
+    def step(self):
+        self._update_robot_target()
 
-        self.sand_graph = None
-        if wp.get_device().is_cuda and self.mpm_solver.grid_type == "fixed":
-            with wp.ScopedCapture() as capture:
-                self.simulate_sand()
-            self.sand_graph = capture.graph
-
-    def simulate_robot(self):
+        # Interleave one robot substep with one MPM substep so that each MPM
+        # step sees a body_q that advanced by exactly sim_dt.  With finite_difference
+        # mode this means velocity = Δbody_q / sim_dt = exact scoop velocity (no N×
+        # overestimate).  The smaller sim_dt per MPM step also cuts tunneling risk
+        # by sim_substeps× vs running all MPM steps after a full-frame robot advance.
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             self.viewer.apply_forces(self.state_0)
             self.robot_solver.step(self.state_0, self.state_1, self.control, contacts=None, dt=self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
-
-    def simulate_sand(self):
-        # Single implicit MPM step over the full frame dt.
-        # Using sub-steps here would save body_q_prev after each sub-step, causing
-        # the finite-difference collider velocity to be estimated over mpm_dt instead
-        # of frame_dt — an N×overestimate that launches sand out of the scoop.
-        self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.frame_dt)
-
-    def step(self):
-        self._update_robot_target()
-
-        if self.robot_graph:
-            wp.capture_launch(self.robot_graph)
-        else:
-            self.simulate_robot()
-
-        if self.sand_graph:
-            wp.capture_launch(self.sand_graph)
-        else:
-            self.simulate_sand()
+            # Project any particles that tunnelled through the scoop back outside before
+            # the grid-level solve runs.  body_q_prev still holds the pre-robot-step
+            # position so the velocity estimate is correct.
+            self.mpm_solver._project_outside(self.state_0, self.state_0, self.sim_dt)
+            self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.sim_dt)
 
         self.sim_time += self.frame_dt
 
@@ -390,9 +369,9 @@ class Example:
         parser.add_argument("--friction",           "-mu",  type=float, default=1.4)
         parser.add_argument("--damping",                    type=float, default=400.0)
 
-        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=250.0)
+        parser.add_argument("--yield-pressure",     "-yp",  type=float, default=50.0)
         parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.2)
-        parser.add_argument("--yield-stress",       "-ys",  type=float, default=150.0)
+        parser.add_argument("--yield-stress",       "-ys",  type=float, default=100.0)
         parser.add_argument("--hardening",                  type=float, default=1.0)
 
         return parser
