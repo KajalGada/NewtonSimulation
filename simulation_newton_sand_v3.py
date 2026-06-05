@@ -68,6 +68,13 @@ class Example:
             floating=False,
             enable_self_collisions=False,
         )
+        # Set shape_margin for all robot shapes so _project_outside pushes particles
+        # to this distance *outside* the surface instead of snapping them to it.
+        # Prevents the bowl-bottom convergence that causes zero-separation meshing.
+        _n_robot_shapes = len(builder.shape_margin)
+        _particle_radius = args.voxel_size / args.particles_per_cell * 0.5
+        for _i in range(_n_robot_shapes):
+            builder.shape_margin[_i] = _particle_radius * 2.0
 
         self.ur5e_dof = 6
         builder.joint_q[:self.ur5e_dof] = q_start.tolist()
@@ -162,8 +169,19 @@ class Example:
         # ------------------------------------------------------------------
         # Model & MPM solver
         # ------------------------------------------------------------------
+        _body_labels = list(builder.body_label) if hasattr(builder, "body_label") else []
         self.model = builder.finalize()
         self.model.set_gravity(args.gravity)
+
+        # Find the scoop body index (last link in chain, or search by label)
+        self._scoop_body_idx = self.model.body_count - 1
+        for i, lbl in enumerate(_body_labels):
+            if lbl.lower().endswith("scoop_link") or lbl.lower().endswith("tool0"):
+                self._scoop_body_idx = i
+                print(f"[INFO] Scoop body index: {i} ('{lbl}')")
+                break
+        else:
+            print(f"[INFO] Scoop body index: {self._scoop_body_idx} ('{_body_labels[self._scoop_body_idx] if _body_labels else 'unknown'}', fallback)")
 
         mpm_options = SolverImplicitMPM.Config()
         for key in vars(args):
@@ -204,6 +222,17 @@ class Example:
             self.viewer.register_ui_callback(self.render_ui, position="side")
         self.viewer.show_particles = True
 
+        self._num_frames = args.num_frames
+        self._frame_count = 0
+
+        self._diag_file = open("particle_diag.csv", "w")
+        self._diag_file.write(
+            "t,scoop_z,z_min,z_max,z_mean,n_lifted,"
+            "lifted_x_mean,lifted_y_mean,lifted_x_std,lifted_y_std,"
+            "lifted_z_std,lifted_z_max,"
+            "below_ground,min_neighbor_dist\n"
+        )
+
     # ------------------------------------------------------------------
     # Robot control
     # ------------------------------------------------------------------
@@ -239,13 +268,61 @@ class Example:
             self.viewer.apply_forces(self.state_0)
             self.robot_solver.step(self.state_0, self.state_1, self.control, contacts=None, dt=self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
-            # Project any particles that tunnelled through the scoop back outside before
-            # the grid-level solve runs.  body_q_prev still holds the pre-robot-step
-            # position so the velocity estimate is correct.
-            self.mpm_solver._project_outside(self.state_0, self.state_0, self.sim_dt)
+            # max_dist limits projection to particles within one voxel of the scoop
+            # surface.  Particles deeper in the heap (> voxel_size away from any
+            # scoop face) are left untouched so they can stack naturally via MPM
+            # inter-particle pressure instead of being snapped back to the bowl floor.
+            self.mpm_solver._project_outside(
+                self.state_0, self.state_0, self.sim_dt, max_dist=self.mpm_solver.voxel_size
+            )
             self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.sim_dt)
 
         self.sim_time += self.frame_dt
+        self._frame_count += 1
+
+        pos = self.state_0.particle_q.numpy()
+        z, x, y = pos[:, 2], pos[:, 0], pos[:, 1]
+
+        # Scoop body world position: body_q shape is (num_bodies, 7) [tx,ty,tz,qx,qy,qz,qw]
+        body_q_np = self.state_0.body_q.numpy()
+        scoop_z = float(body_q_np[self._scoop_body_idx, 2])
+
+        # Lifted particles (above 10 cm)
+        lifted = z > 0.10
+        n_lifted = int(lifted.sum())
+        if n_lifted > 0:
+            lz = z[lifted]
+            lifted_x_mean = float(x[lifted].mean())
+            lifted_y_mean = float(y[lifted].mean())
+            lifted_x_std  = float(x[lifted].std())
+            lifted_y_std  = float(y[lifted].std())
+            lifted_z_std  = float(lz.std())
+            lifted_z_max  = float(lz.max())
+
+            # Nearest-neighbour sample for meshing check (200-particle subset)
+            rng = np.random.default_rng(0)
+            idx = rng.choice(np.where(lifted)[0], size=min(200, n_lifted), replace=False)
+            samp = pos[idx]
+            diff = samp[:, None, :] - samp[None, :, :]
+            dists = np.linalg.norm(diff, axis=-1)
+            np.fill_diagonal(dists, np.inf)
+            min_nn = float(dists.min())
+        else:
+            lifted_x_mean = lifted_y_mean = lifted_x_std = lifted_y_std = 0.0
+            lifted_z_std = lifted_z_max = min_nn = 0.0
+
+        self._diag_file.write(
+            f"{self.sim_time:.4f},{scoop_z:.4f},"
+            f"{z.min():.4f},{z.max():.4f},{z.mean():.4f},{n_lifted},"
+            f"{lifted_x_mean:.4f},{lifted_y_mean:.4f},{lifted_x_std:.4f},{lifted_y_std:.4f},"
+            f"{lifted_z_std:.4f},{lifted_z_max:.4f},"
+            f"{int((z < -0.05).sum())},{min_nn:.5f}\n"
+        )
+        self._diag_file.flush()
+
+        if self._frame_count >= self._num_frames:
+            self._diag_file.close()
+            self.viewer.close()
 
     # ------------------------------------------------------------------
     # Rendering
@@ -362,15 +439,15 @@ class Example:
         # Kinetic-sand material parameters
         parser.add_argument("--density",            type=float, default=1400.0)
         parser.add_argument("--air-drag",           type=float, default=6.0)
-        parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.0)
+        parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.15)
 
         parser.add_argument("--young-modulus",      "-ym",  type=float, default=8000)
         parser.add_argument("--poisson-ratio",      "-nu",  type=float, default=0.4)
         parser.add_argument("--friction",           "-mu",  type=float, default=1.4)
-        parser.add_argument("--damping",                    type=float, default=400.0)
+        parser.add_argument("--damping",                    type=float, default=900.0)
 
         parser.add_argument("--yield-pressure",     "-yp",  type=float, default=50.0)
-        parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.2)
+        parser.add_argument("--tensile-yield-ratio", "-tyr", type=float, default=0.6)
         parser.add_argument("--yield-stress",       "-ys",  type=float, default=100.0)
         parser.add_argument("--hardening",                  type=float, default=1.0)
 
