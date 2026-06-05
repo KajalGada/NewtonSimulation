@@ -16,8 +16,6 @@
 # dataset's native sample rate and interpolated to the simulation frame rate.
 # SolverImplicitMPM handles particle↔rigid collision separately.
 
-import sys
-
 import numpy as np
 import warp as wp
 
@@ -169,19 +167,8 @@ class Example:
         # ------------------------------------------------------------------
         # Model & MPM solver
         # ------------------------------------------------------------------
-        _body_labels = list(builder.body_label) if hasattr(builder, "body_label") else []
         self.model = builder.finalize()
         self.model.set_gravity(args.gravity)
-
-        # Find the scoop body index (last link in chain, or search by label)
-        self._scoop_body_idx = self.model.body_count - 1
-        for i, lbl in enumerate(_body_labels):
-            if lbl.lower().endswith("scoop_link") or lbl.lower().endswith("tool0"):
-                self._scoop_body_idx = i
-                print(f"[INFO] Scoop body index: {i} ('{lbl}')")
-                break
-        else:
-            print(f"[INFO] Scoop body index: {self._scoop_body_idx} ('{_body_labels[self._scoop_body_idx] if _body_labels else 'unknown'}', fallback)")
 
         mpm_options = SolverImplicitMPM.Config()
         for key in vars(args):
@@ -221,17 +208,6 @@ class Example:
             self.viewer.set_camera(wp.vec3(1.5, -1.5, 1.2), pitch=-30.0, yaw=135.0)
             self.viewer.register_ui_callback(self.render_ui, position="side")
         self.viewer.show_particles = True
-
-        self._num_frames = args.num_frames
-        self._frame_count = 0
-
-        self._diag_file = open("particle_diag.csv", "w")
-        self._diag_file.write(
-            "t,scoop_z,z_min,z_max,z_mean,n_lifted,"
-            "lifted_x_mean,lifted_y_mean,lifted_x_std,lifted_y_std,"
-            "lifted_z_std,lifted_z_max,"
-            "below_ground,min_neighbor_dist\n"
-        )
 
     # ------------------------------------------------------------------
     # Robot control
@@ -278,51 +254,6 @@ class Example:
             self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.sim_dt)
 
         self.sim_time += self.frame_dt
-        self._frame_count += 1
-
-        pos = self.state_0.particle_q.numpy()
-        z, x, y = pos[:, 2], pos[:, 0], pos[:, 1]
-
-        # Scoop body world position: body_q shape is (num_bodies, 7) [tx,ty,tz,qx,qy,qz,qw]
-        body_q_np = self.state_0.body_q.numpy()
-        scoop_z = float(body_q_np[self._scoop_body_idx, 2])
-
-        # Lifted particles (above 10 cm)
-        lifted = z > 0.10
-        n_lifted = int(lifted.sum())
-        if n_lifted > 0:
-            lz = z[lifted]
-            lifted_x_mean = float(x[lifted].mean())
-            lifted_y_mean = float(y[lifted].mean())
-            lifted_x_std  = float(x[lifted].std())
-            lifted_y_std  = float(y[lifted].std())
-            lifted_z_std  = float(lz.std())
-            lifted_z_max  = float(lz.max())
-
-            # Nearest-neighbour sample for meshing check (200-particle subset)
-            rng = np.random.default_rng(0)
-            idx = rng.choice(np.where(lifted)[0], size=min(200, n_lifted), replace=False)
-            samp = pos[idx]
-            diff = samp[:, None, :] - samp[None, :, :]
-            dists = np.linalg.norm(diff, axis=-1)
-            np.fill_diagonal(dists, np.inf)
-            min_nn = float(dists.min())
-        else:
-            lifted_x_mean = lifted_y_mean = lifted_x_std = lifted_y_std = 0.0
-            lifted_z_std = lifted_z_max = min_nn = 0.0
-
-        self._diag_file.write(
-            f"{self.sim_time:.4f},{scoop_z:.4f},"
-            f"{z.min():.4f},{z.max():.4f},{z.mean():.4f},{n_lifted},"
-            f"{lifted_x_mean:.4f},{lifted_y_mean:.4f},{lifted_x_std:.4f},{lifted_y_std:.4f},"
-            f"{lifted_z_std:.4f},{lifted_z_max:.4f},"
-            f"{int((z < -0.05).sum())},{min_nn:.5f}\n"
-        )
-        self._diag_file.flush()
-
-        if self._frame_count >= self._num_frames:
-            self._diag_file.close()
-            self.viewer.close()
 
     # ------------------------------------------------------------------
     # Rendering

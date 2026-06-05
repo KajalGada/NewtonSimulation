@@ -3,5 +3,5 @@
 Run simulation:
 
 ```
-python3 simulation_newton_sand_v3.py
+python3 simulation_newton_sand.py
 ```
