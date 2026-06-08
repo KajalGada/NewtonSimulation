@@ -331,9 +331,9 @@
   ========================================================= -->
   <link name="scoop_link">
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/>
       <geometry>
-        <mesh filename="ur5_scoop.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="newscoop.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>

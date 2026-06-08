@@ -28,7 +28,7 @@ from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 
 _ROOT = Path(__file__).resolve().parent
 _DATASET_PATH = _ROOT / "dataset" / "demo_20260515_140725_dedup.npz"
-_URDF_PATH = _ROOT / "ur_urdf" / "ur5_with_scoop.urdf"
+_URDF_PATH = _ROOT / "ur_urdf" / "ur5_with_scoop_v2.urdf"
 
 
 class Example:
