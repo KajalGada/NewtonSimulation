@@ -28,7 +28,32 @@ from newton.solvers import SolverImplicitMPM, SolverMuJoCo
 
 _ROOT = Path(__file__).resolve().parent
 _DATASET_PATH = _ROOT / "dataset" / "demo_20260515_140725_dedup.npz"
-_URDF_PATH = _ROOT / "ur_urdf" / "ur5_with_scoop.urdf"
+_URDF_PATH = _ROOT / "ur_urdf" / "ur5_with_scoop_v2.urdf"
+
+
+@wp.kernel
+def _compute_body_forces(
+    dt: float,
+    collider_ids: wp.array(dtype=int),
+    collider_impulses: wp.array(dtype=wp.vec3),
+    collider_impulse_pos: wp.array(dtype=wp.vec3),
+    body_ids: wp.array(dtype=int),
+    body_q: wp.array(dtype=wp.transform),
+    body_com: wp.array(dtype=wp.vec3),
+    body_f: wp.array(dtype=wp.spatial_vector),
+):
+    """Reduce per-grid-node sand impulses to per-body 6-DOF wrench and accumulate into body_f."""
+    i = wp.tid()
+    cid = collider_ids[i]
+    if cid >= 0 and cid < body_ids.shape[0]:
+        body_index = body_ids[cid]
+        if body_index == -1:
+            return
+        f_world = collider_impulses[i] / dt
+        X_wb    = body_q[body_index]
+        X_com   = body_com[body_index]
+        r = collider_impulse_pos[i] - wp.transform_point(X_wb, X_com)
+        wp.atomic_add(body_f, body_index, wp.spatial_vector(f_world, wp.cross(r, f_world)))
 
 
 class Example:
@@ -76,7 +101,7 @@ class Example:
         _n_robot_shapes = len(builder.shape_margin)
         _particle_radius = args.voxel_size / args.particles_per_cell * 0.5
         for _i in range(_n_robot_shapes):
-            builder.shape_margin[_i] = _particle_radius * 2.0
+            builder.shape_margin[_i] = _particle_radius * 0.5
 
         self.ur5e_dof = 6
         builder.joint_q[:self.ur5e_dof] = q_start.tolist()
@@ -193,16 +218,16 @@ class Example:
 
         self.mpm_solver = SolverImplicitMPM(self.model, mpm_options)
         self.mpm_solver.setup_collider(
-            body_mass=wp.zeros_like(self.model.body_mass),
+            body_mass=self.model.body_mass,
             body_q=self.state_0.body_q,
         )
 
         self.robot_solver = SolverMuJoCo(self.model)
 
         self.control = self.model.control()
-        pos_np = self.control.joint_target_q.numpy()
+        pos_np = self.control.joint_target_pos.numpy()
         pos_np[:self.ur5e_dof] = q_start
-        self.control.joint_target_q.assign(pos_np)
+        self.control.joint_target_pos.assign(pos_np)
 
         # ------------------------------------------------------------------
         # Viewer setup
@@ -220,6 +245,21 @@ class Example:
         self._t_count   = 0
         self._t_print_every = 30  # print averages every N frames
 
+        # Maps collider shape index → body index (-1 for static shapes like ground/walls).
+        self._collider_body_id  = self.mpm_solver.collider_body_index          # Warp array — used by GPU kernel
+        self._collider_body_idx = self._collider_body_id.numpy()               # numpy copy — used for CPU wrench logging
+
+        # Pre-allocated GPU buffers for two-way coupling impulses.
+        # Fixed size avoids per-step allocation; unused slots stay -1 (kernel skips them).
+        _max_nodes = 1 << 20
+        self._coll_impulses = wp.zeros(_max_nodes, dtype=wp.vec3,  device=self.model.device)
+        self._coll_imp_pos  = wp.zeros(_max_nodes, dtype=wp.vec3,  device=self.model.device)
+        self._coll_imp_ids  = wp.full (_max_nodes, value=-1, dtype=int, device=self.model.device)
+
+        # Wrench accumulators — sand → scoop (logged every _t_print_every frames).
+        self._wrench_f = np.zeros(3, dtype=np.float64)
+        self._wrench_t = np.zeros(3, dtype=np.float64)
+
     # ------------------------------------------------------------------
     # Robot control
     # ------------------------------------------------------------------
@@ -235,9 +275,9 @@ class Example:
             frac = t - idx_lo
             q_target = (1.0 - frac) * self._dataset_states[idx_lo] + frac * self._dataset_states[idx_hi]
 
-        pos_np = self.control.joint_target_q.numpy()
+        pos_np = self.control.joint_target_pos.numpy()
         pos_np[:self.ur5e_dof] = q_target
-        self.control.joint_target_q.assign(pos_np)
+        self.control.joint_target_pos.assign(pos_np)
 
     # ------------------------------------------------------------------
     # Simulation loop
@@ -254,6 +294,25 @@ class Example:
         # by sim_substeps× vs running all MPM steps after a full-frame robot advance.
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
+
+            # Two-way coupling: apply sand → scoop impulses from the previous MPM
+            # step as an external force on the robot bodies before the robot solve.
+            # On the very first substep the buffers are all-zero so this is a no-op.
+            wp.launch(
+                _compute_body_forces,
+                dim=self._coll_imp_ids.shape[0],
+                inputs=[
+                    self.sim_dt,
+                    self._coll_imp_ids,
+                    self._coll_impulses,
+                    self._coll_imp_pos,
+                    self._collider_body_id,
+                    self.state_0.body_q,
+                    self.model.body_com,
+                    self.state_0.body_f,
+                ],
+            )
+
             self.viewer.apply_forces(self.state_0)
 
             t0 = time.perf_counter()
@@ -269,7 +328,7 @@ class Example:
             # inter-particle pressure instead of being snapped back to the bowl floor.
             t0 = time.perf_counter()
             self.mpm_solver.project_outside(
-                self.state_0, self.state_0, self.sim_dt, gap=self.mpm_solver.voxel_size
+                self.state_0, self.state_0, self.sim_dt, gap=self.mpm_solver.voxel_size * 0.1
             )
             wp.synchronize()
             self._t_project += time.perf_counter() - t0
@@ -278,6 +337,26 @@ class Example:
             self.mpm_solver.step(self.state_0, self.state_0, contacts=None, control=None, dt=self.sim_dt)
             wp.synchronize()
             self._t_mpm += time.perf_counter() - t0
+
+            # Collect new impulses: copy into fixed-size GPU buffers for next
+            # substep's _compute_body_forces, and into numpy for wrench logging.
+            impulses, imp_pos, imp_ids = self.mpm_solver.collect_collider_impulses(self.state_0)
+            n = min(impulses.shape[0], self._coll_impulses.shape[0])
+            self._coll_imp_ids.fill_(-1)
+            if n > 0:
+                self._coll_impulses[:n].assign(impulses[:n])
+                self._coll_imp_pos[:n].assign(imp_pos[:n])
+                self._coll_imp_ids[:n].assign(imp_ids[:n])
+
+                # CPU wrench logging (GPU already sync'd above)
+                imp_np  = impulses.numpy()
+                pos_np  = imp_pos.numpy()
+                ids_np  = imp_ids.numpy()
+                body_np = self._collider_body_idx[ids_np]
+                mask    = body_np >= 0
+                if mask.any():
+                    self._wrench_f += imp_np[mask].sum(axis=0) / self.sim_dt
+                    self._wrench_t += np.cross(pos_np[mask], imp_np[mask]).sum(axis=0) / self.sim_dt
 
         self._t_frame += time.perf_counter() - t_frame_start
         self._t_count += 1
@@ -293,8 +372,18 @@ class Example:
                 f"[PERF] frame={tf:6.1f}ms  fps={1000/tf:5.1f}  |  "
                 f"robot={tr:5.1f}ms  project={tp:5.1f}ms  mpm={tm:6.1f}ms  (per substep)"
             )
+            n_sub = n * self.sim_substeps
+            wf = self._wrench_f / n_sub
+            wt = self._wrench_t / n_sub
+            print(
+                f"[WRENCH] F=[{wf[0]:7.2f} {wf[1]:7.2f} {wf[2]:7.2f}]N  "
+                f"T=[{wt[0]:6.2f} {wt[1]:6.2f} {wt[2]:6.2f}]N·m  "
+                f"|F|={np.linalg.norm(wf):.2f}N  (avg/substep)"
+            )
             self._t_frame = self._t_robot = self._t_project = self._t_mpm = 0.0
             self._t_count = 0
+            self._wrench_f[:] = 0.0
+            self._wrench_t[:] = 0.0
 
         self.sim_time += self.frame_dt
 
@@ -412,7 +501,7 @@ class Example:
 
         # Kinetic-sand material parameters
         parser.add_argument("--density",            type=float, default=1400.0)
-        parser.add_argument("--air-drag",           type=float, default=6.0)
+        parser.add_argument("--air-drag",           type=float, default=10.0)
         parser.add_argument("--critical-fraction",  "-cf", type=float, default=0.15)
 
         parser.add_argument("--young-modulus",      "-ym",  type=float, default=8000)
