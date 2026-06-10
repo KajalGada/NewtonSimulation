@@ -45,7 +45,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/base.stl"/>
+        <mesh filename="base.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -78,7 +78,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 3.141592653589793"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/shoulder.stl"/>
+        <mesh filename="shoulder.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -112,7 +112,7 @@
     <collision>
       <origin xyz="0 0 0.13585" rpy="1.5707963267948966 0 -1.5707963267948966"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/upperarm.stl"/>
+        <mesh filename="upperarm.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -146,7 +146,7 @@
     <collision>
       <origin xyz="0 0 0.0165" rpy="1.5707963267948966 0 -1.5707963267948966"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/forearm.stl"/>
+        <mesh filename="forearm.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -180,7 +180,7 @@
     <collision>
       <origin xyz="0 0 -0.093" rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/wrist1.stl"/>
+        <mesh filename="wrist1.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -214,7 +214,7 @@
     <collision>
       <origin xyz="0 0 -0.095" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/wrist2.stl"/>
+        <mesh filename="wrist2.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -248,7 +248,7 @@
     <collision>
       <origin xyz="0 0 -0.0818" rpy="1.5707963267948966 0 0"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/wrist3.stl"/>
+        <mesh filename="wrist3.stl"/>
       </geometry>
     </collision>
     <inertial>
@@ -333,7 +333,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="/home/gmr/Downloads/NewtonSimulation/ur_urdf/ur5_scoop.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="ur5_scoop.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
