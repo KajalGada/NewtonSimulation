@@ -8,6 +8,7 @@
 # replayed from a pre-recorded dataset of world-frame scoop poses.
 # SolverImplicitMPM handles all particle physics and particle↔scoop collision.
 
+from pathlib import Path
 import numpy as np
 import trimesh
 import warp as wp
@@ -16,10 +17,11 @@ import newton
 import newton.examples
 from newton.solvers import SolverImplicitMPM
 
-_SCOOP_STL_PATH = "ur_urdf/ur5_scoop.stl"
-# _SCOOP_DATASET_PATH = "dataset/demo_20260515_140725_scoop_poses.npz"
-# _SCOOP_DATASET_PATH = "dataset/demo_20260518_143230_scoop_poses.npz"
-_SCOOP_DATASET_PATH = "dataset/demo_20260518_143752_scoop_poses.npz"
+_ROOT = Path(__file__).resolve().parent
+_SCOOP_STL_PATH = _ROOT / "ur_urdf" / "ur5_scoop.stl"
+# _SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260515_140725_scoop_poses.npz"
+# _SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260518_143230_scoop_poses.npz"
+_SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260518_143752_scoop_poses.npz"
 
 
 class Example:
