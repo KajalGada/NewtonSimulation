@@ -178,10 +178,10 @@ class Example:
             if hasattr(self.model.mpm, key):
                 getattr(self.model.mpm, key).fill_(getattr(args, key))
 
-        # finite_difference computes collider velocity as (body_q - body_q_prev) / dt.
+        # backward computes collider velocity as (body_q - body_q_prev) / dt.
         # With per-substep body_q updates (advancing time by sim_dt each iteration)
         # the displacement and dt cancel correctly → exact scoop velocity.
-        mpm_options.collider_velocity_mode = "finite_difference"
+        mpm_options.collider_velocity_mode = "backward"
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()  # unused but kept for API symmetry
@@ -237,9 +237,9 @@ class Example:
             bq[self.scoop_body_idx] = [*pos, *quat]
             self.state_0.body_q.assign(bq)
 
-            self.mpm_solver._project_outside(
+            self.mpm_solver.project_outside(
                 self.state_0, self.state_0, self.sim_dt,
-                max_dist=self.mpm_solver.voxel_size * 0.5,
+                gap=self.mpm_solver.voxel_size * 0.5,
             )
             self.mpm_solver.step(
                 self.state_0, self.state_0,
@@ -357,8 +357,8 @@ class Example:
         parser.add_argument("--tolerance", "-tol", type=float, default=1.0e-6)
         parser.add_argument(
             "--collider-velocity-mode", "-cvm", type=str,
-            default="finite_difference",
-            choices=["instantaneous", "finite_difference"],
+            default="backward",
+            choices=["forward", "backward"],
         )
 
         # Kinetic-sand material parameters
