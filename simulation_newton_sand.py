@@ -18,11 +18,10 @@ import newton.examples
 from newton.solvers import SolverImplicitMPM
 
 _ROOT = Path(__file__).resolve().parent
+_SCOOP_STL_PATH = _ROOT / "ur_urdf" / "ur5_scoop.stl"
 # _SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260515_140725_scoop_poses.npz"
 # _SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260518_143230_scoop_poses.npz"
 _SCOOP_DATASET_PATH = _ROOT / "dataset" / "demo_20260518_143752_scoop_poses.npz"
-
-_SCOOP_STL_PATH = _ROOT / "ur_urdf" / "ur5_scoop.stl"
 
 
 class Example:
