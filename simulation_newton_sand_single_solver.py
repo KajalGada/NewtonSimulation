@@ -93,7 +93,7 @@ class Example:
         # Push particles to this distance outside the scoop surface to avoid
         # zero-separation meshing at the bowl floor (same logic as robot arm
         # version).
-        builder.shape_margin[-1] = _particle_radius * 2.0
+        builder.shape_margin[-1] = _particle_radius * 3.0
 
         # ---- Optional extra collider in the scene ----------------------
         self.collider = args.collider
@@ -176,6 +176,11 @@ class Example:
 
         # ---- Sand particles --------------------------------------------
         Example.emit_particles(builder, args)
+
+        # CFL condition: no particle moves more than half a voxel per substep.
+        # Prevents fast particles near the moving scoop from tunnelling through
+        # thin mesh walls between project_outside calls.
+        builder.particle_max_velocity = 0.5 * args.voxel_size / self.sim_dt
 
         # ------------------------------------------------------------------
         # Model & MPM solver
@@ -355,7 +360,7 @@ class Example:
         parser.add_argument("--initial-jitter", type=float, default=0.5)
 
         # Grid / solver
-        parser.add_argument("--voxel-size", "-dx", type=float, default=0.01)
+        parser.add_argument("--voxel-size", "-dx", type=float, default=0.007)
         parser.add_argument(
             "--grid-type", "-gt", type=str,
             default="sparse", choices=["sparse", "fixed", "dense"],
