@@ -57,8 +57,8 @@ class Example:
         # ---- Kinematic scoop body --------------------------------------
         # Load STL via trimesh; mesh is stored in millimetres in the file.
         _scoop_raw = trimesh.load(_SCOOP_STL_PATH)
-        _vertices  = np.array(_scoop_raw.vertices, dtype=np.float32) * 0.001
-        _indices   = np.array(_scoop_raw.faces,    dtype=np.int32).flatten()
+        _raw_verts = np.array(_scoop_raw.vertices, dtype=np.float32) * 0.001
+        _raw_faces = np.array(_scoop_raw.faces,    dtype=np.int32)
 
         # Apply the same orientation correction as the URDF collision origin:
         # rpy="-1.5707963267948966 0 0" → rotate -90° around X axis.
@@ -67,9 +67,24 @@ class Example:
             [0,  0,  1],
             [0, -1,  0],
         ], dtype=np.float32)
-        _vertices = _vertices @ _Rx.T
 
-        scoop_mesh = newton.Mesh(_vertices, _indices)
+        # Split the mesh by dominant face-normal direction and give each wall
+        # section a distinct colour. Grouping uses pre-rotation normals; the
+        # rotation is baked into each sub-mesh so world-space colours are correct.
+        _SCOOP_WALL_COLOURS = {
+            ( 0, +1): (0.85, 0.25, 0.25),  # right wall   – red
+            ( 0, -1): (0.25, 0.50, 0.85),  # left wall    – blue
+            ( 1, -1): (0.95, 0.75, 0.15),  # inner bowl   – gold
+            ( 1, +1): (0.40, 0.40, 0.40),  # outer bottom – dark grey
+            ( 2, -1): (0.65, 0.65, 0.65),  # handle/back  – light grey
+            ( 2, +1): (0.55, 0.25, 0.80),  # front rim    – purple
+        }
+        _face_normals = np.array(
+            trimesh.Trimesh(vertices=_raw_verts, faces=_raw_faces, process=False).face_normals,
+            dtype=np.float32,
+        )
+        _dom_ax   = np.argmax(np.abs(_face_normals), axis=1)
+        _dom_sign = np.sign(_face_normals[np.arange(len(_face_normals)), _dom_ax]).astype(int)
 
         # Initial pose from the first dataset frame.
         _p0 = self._dataset_positions[0]
@@ -85,15 +100,26 @@ class Example:
             is_kinematic=True,
             label="scoop",
         )
-        builder.add_shape_mesh(
-            body=self.scoop_body_idx,
-            mesh=scoop_mesh,
-            cfg=newton.ModelBuilder.ShapeConfig(mu=0.6, density=0.0),
-        )
-        # Push particles to this distance outside the scoop surface to avoid
-        # zero-separation meshing at the bowl floor (same logic as robot arm
-        # version).
-        builder.shape_margin[-1] = _particle_radius * 3.0
+        _shape_cfg = newton.ModelBuilder.ShapeConfig(mu=0.6, density=0.0)
+        for (ax, sign), colour in _SCOOP_WALL_COLOURS.items():
+            mask = (_dom_ax == ax) & (_dom_sign == sign)
+            if not mask.any():
+                continue
+            group_faces = _raw_faces[mask]
+            unique_v, inv = np.unique(group_faces, return_inverse=True)
+            sub_verts = (_raw_verts[unique_v] @ _Rx.T).astype(np.float32)
+            sub_faces = inv.reshape(-1, 3).astype(np.int32)
+            sub_mesh  = newton.Mesh(sub_verts, sub_faces)
+            shape_idx = builder.add_shape_mesh(
+                body=self.scoop_body_idx,
+                mesh=sub_mesh,
+                cfg=_shape_cfg,
+                color=colour,
+            )
+            # Push particles to this distance outside the scoop surface to avoid
+            # zero-separation meshing at the bowl floor (same logic as robot arm
+            # version).
+            builder.shape_margin[shape_idx] = _particle_radius * 3.0
 
         # ---- Optional extra collider in the scene ----------------------
         self.collider = args.collider
