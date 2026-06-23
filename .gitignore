@@ -1,1 +1,32 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments (rebuild on each machine from requirements.txt) ---
+.venv/
+venv/
+env/
+
+# --- Newton / viewer / sim artifacts ---
 usd_dir
+imgui.ini
+*.usd
+*.usdc
+*.usda
+
+# --- IsaacLab clone (separate repo; never nest into this one) ---
+RL/
+
+# --- Editor / OS / scratch ---
+.vscode/
+.idea/
+.DS_Store
+Untitled
+_debug_*.py
+_*.png
+
+# NOTE: dataset/*.npz is intentionally NOT ignored — those are tracked.
